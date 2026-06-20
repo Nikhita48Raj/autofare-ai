@@ -33,7 +33,7 @@
     "resolveJsonModule": true,
     "module": "esnext",
     "moduleResolution": "bundler",
-    "jsx": "react-jsx",
+    "jsx": "preserve",
     "incremental": true,
     "noEmit": true,
     "forceConsistentCasingInFileNames": true,
