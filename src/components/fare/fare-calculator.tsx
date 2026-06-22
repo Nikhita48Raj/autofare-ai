@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,8 @@ const formSchema = {
 };
 
 export function FareCalculator() {
+  const router = useRouter();
+
   const [pickupQuery, setPickupQuery] = useState("");
   const [dropoffQuery, setDropoffQuery] = useState("");
   const [pickupSelection, setPickupSelection] = useState<LocationOption | null>(null);
@@ -36,6 +39,11 @@ export function FareCalculator() {
   const [isLoadingDistance, setIsLoadingDistance] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // Dispute and Overcharge Reporting Fields
+  const [actualFare, setActualFare] = useState<number | null>(null);
+  const [notes, setNotes] = useState("");
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
   const clearPickupSelection = () => {
     setPickupSelection(null);
@@ -133,6 +141,8 @@ export function FareCalculator() {
     event.preventDefault();
     setErrorMessage(null);
     setEstimate(null);
+    setActualFare(null);
+    setNotes("");
 
     if (!formSchema.pickup(pickupQuery) || !formSchema.dropoff(dropoffQuery)) {
       setErrorMessage("Please enter valid pickup and drop locations.");
@@ -183,6 +193,54 @@ export function FareCalculator() {
       );
     } finally {
       setIsLoadingDistance(false);
+    }
+  };
+
+  const handleShareDispute = async () => {
+    if (!pickupSelection || !dropoffSelection || !estimate) return;
+
+    if (pickupSelection.lat === undefined || pickupSelection.lng === undefined || dropoffSelection.lat === undefined || dropoffSelection.lng === undefined) {
+      setErrorMessage("Location coordinates are not resolved.");
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsSubmittingReport(true);
+
+    try {
+      const response = await fetch("/api/reports", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pickup_name: pickupSelection.description,
+          drop_name: dropoffSelection.description,
+          pickup_lat: pickupSelection.lat,
+          pickup_lng: pickupSelection.lng,
+          drop_lat: dropoffSelection.lat,
+          drop_lng: dropoffSelection.lng,
+          distance_km: estimate.distanceKm,
+          official_fare: estimate.officialFare,
+          street_fare: estimate.streetFare,
+          actual_fare: actualFare,
+          night_surcharge: nightSurcharge,
+          special_charges: specialCharges,
+          notes: notes.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("API call failed.");
+      }
+
+      const data = (await response.json()) as { id: string; warning?: string };
+      router.push(`/dispute/${data.id}`);
+    } catch (error) {
+      console.error("Report submit error:", error);
+      setErrorMessage("Could not submit the dispute report. Please try again.");
+    } finally {
+      setIsSubmittingReport(false);
     }
   };
 
@@ -344,7 +402,7 @@ export function FareCalculator() {
         <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-soft">
           <h3 className="text-xl font-semibold text-slate-950">Estimated fare output</h3>
           {estimate ? (
-            <div className="mt-6 space-y-4">
+            <div className="mt-6 space-y-6">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-3xl bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">Distance</p>
@@ -381,6 +439,47 @@ export function FareCalculator() {
                   <span>Total</span>
                   <span>Rs. {estimate.totalFare.toFixed(2)}</span>
                 </div>
+              </div>
+
+              {/* Overcharge / Dispute Submission Box */}
+              <div className="border-t border-slate-200 pt-6 space-y-4">
+                <div>
+                  <h4 className="text-base font-semibold text-slate-950">Did you get overcharged?</h4>
+                  <p className="mt-1 text-xs text-slate-500">Generate a dispute page to share on social media or report to the community.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="actualFare" className="text-slate-700 text-xs font-semibold">Actual fare demanded (Rs.)</Label>
+                  <Input
+                    id="actualFare"
+                    type="number"
+                    min="0"
+                    placeholder="What did the driver ask for?"
+                    value={actualFare ?? ""}
+                    onChange={(event) => setActualFare(Number(event.target.value) || null)}
+                    className="h-auto rounded-xl border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-950 focus-visible:ring-1 focus-visible:ring-blue-300"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="notes" className="text-slate-700 text-xs font-semibold">Driver behavior / remarks</Label>
+                  <textarea
+                    id="notes"
+                    placeholder="E.g., Refused to turn on the meter, demanded flat Rs. 300, rain surcharge, luggage issues..."
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-950 outline-none focus:ring-1 focus:ring-blue-300 min-h-[80px] font-sans"
+                  />
+                </div>
+
+                <Button
+                  type="button"
+                  onClick={handleShareDispute}
+                  disabled={isSubmittingReport}
+                  className="w-full rounded-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold transition shadow-sm hover:shadow"
+                >
+                  {isSubmittingReport ? "Generating dispute page..." : "Share Dispute Page"}
+                </Button>
               </div>
             </div>
           ) : (
