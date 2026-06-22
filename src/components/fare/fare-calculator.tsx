@@ -3,15 +3,18 @@
 import * as React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { calculateFareEstimate, type FareEstimate } from "@/lib/fare";
-import { estimateDistanceKm, fetchOsmSuggestions } from "@/lib/maps";
+import { estimateDistanceKm, fetchGoogleSuggestions, fetchPlaceDetails, type GoogleSuggestion } from "@/lib/maps";
 import { cn } from "@/lib/utils";
 
 interface LocationOption {
   description: string;
   placeId: string;
-  lat: number;
-  lng: number;
+  lat?: number;
+  lng?: number;
 }
 
 const formSchema = {
@@ -24,14 +27,15 @@ export function FareCalculator() {
   const [dropoffQuery, setDropoffQuery] = useState("");
   const [pickupSelection, setPickupSelection] = useState<LocationOption | null>(null);
   const [dropoffSelection, setDropoffSelection] = useState<LocationOption | null>(null);
-  const [pickupSuggestions, setPickupSuggestions] = useState<LocationOption[]>([]);
-  const [dropoffSuggestions, setDropoffSuggestions] = useState<LocationOption[]>([]);
+  const [pickupSuggestions, setPickupSuggestions] = useState<GoogleSuggestion[]>([]);
+  const [dropoffSuggestions, setDropoffSuggestions] = useState<GoogleSuggestion[]>([]);
   const [specialCharges, setSpecialCharges] = useState(0);
   const [nightSurcharge, setNightSurcharge] = useState(false);
   const [estimate, setEstimate] = useState<FareEstimate | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoadingDistance, setIsLoadingDistance] = useState(false);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   const clearPickupSelection = () => {
     setPickupSelection(null);
@@ -43,7 +47,7 @@ export function FareCalculator() {
 
   const fetchSuggestions = async (
     query: string,
-    setter: React.Dispatch<React.SetStateAction<LocationOption[]>>
+    setter: React.Dispatch<React.SetStateAction<GoogleSuggestion[]>>
   ) => {
     if (query.trim().length < 3) {
       setter([]);
@@ -53,7 +57,7 @@ export function FareCalculator() {
     setIsLoadingSuggestions(true);
 
     try {
-      const results = await fetchOsmSuggestions(query);
+      const results = await fetchGoogleSuggestions(query);
       setter(results);
     } catch (error) {
       console.error("Autocomplete error", error);
@@ -63,18 +67,46 @@ export function FareCalculator() {
     }
   };
 
-  const handleSelectPickup = (option: LocationOption) => {
-    setPickupSelection(option);
-    setPickupQuery(option.description);
-    setPickupSuggestions([]);
+  const handleSelectPickup = async (option: GoogleSuggestion) => {
     setErrorMessage(null);
+    setIsLoadingDetails(true);
+    try {
+      const coords = await fetchPlaceDetails(option.placeId);
+      setPickupSelection({
+        description: option.description,
+        placeId: option.placeId,
+        lat: coords.lat,
+        lng: coords.lng,
+      });
+      setPickupQuery(option.description);
+      setPickupSuggestions([]);
+    } catch (error) {
+      console.error("Failed to fetch coordinates for selection", error);
+      setErrorMessage("Could not resolve the selected location coordinates. Please try again.");
+    } finally {
+      setIsLoadingDetails(false);
+    }
   };
 
-  const handleSelectDropoff = (option: LocationOption) => {
-    setDropoffSelection(option);
-    setDropoffQuery(option.description);
-    setDropoffSuggestions([]);
+  const handleSelectDropoff = async (option: GoogleSuggestion) => {
     setErrorMessage(null);
+    setIsLoadingDetails(true);
+    try {
+      const coords = await fetchPlaceDetails(option.placeId);
+      setDropoffSelection({
+        description: option.description,
+        placeId: option.placeId,
+        lat: coords.lat,
+        lng: coords.lng,
+      });
+      setDropoffQuery(option.description);
+      setDropoffSuggestions([]);
+    } catch (error) {
+      console.error("Failed to fetch coordinates for selection", error);
+      setErrorMessage("Could not resolve the selected location coordinates. Please try again.");
+    } finally {
+      setIsLoadingDetails(false);
+    }
   };
 
   useEffect(() => {
@@ -114,6 +146,16 @@ export function FareCalculator() {
 
     if (pickupSelection.placeId === dropoffSelection.placeId) {
       setErrorMessage("Pickup and drop locations must be different.");
+      return;
+    }
+
+    if (
+      pickupSelection.lat === undefined ||
+      pickupSelection.lng === undefined ||
+      dropoffSelection.lat === undefined ||
+      dropoffSelection.lng === undefined
+    ) {
+      setErrorMessage("Coordinates are not yet resolved. Please select the location again.");
       return;
     }
 
@@ -161,32 +203,34 @@ export function FareCalculator() {
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-700">Fare Calculator</p>
           <h2 className="text-3xl font-semibold text-slate-950">Estimate routes and dispute fares with confidence.</h2>
           <p className="max-w-2xl text-slate-600">
-            Search pickup and drop locations using OpenStreetMap, calculate route distance with OpenRouteService, and compare official versus street fare estimates.
+            Search pickup and drop locations using Google Places API, calculate route distance using Google Distance Matrix, and compare official versus street fare estimates.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="grid gap-6">
           <div className="grid gap-3">
-            <label htmlFor="pickup" className="text-sm font-medium text-slate-700">
+            <Label htmlFor="pickup" className="text-slate-700">
               Pickup location
-            </label>
-            <input
-              id="pickup"
-              value={pickupQuery}
-              onChange={(event) => {
-                clearPickupSelection();
-                setPickupQuery(event.target.value);
-              }}
-              placeholder="Search pickup location"
-              className={cn(
-                "w-full rounded-2xl border px-4 py-3 text-slate-900 outline-none transition focus:ring-2",
-                pickupSelection ? "border-blue-300 focus:ring-blue-200" : "border-slate-200 focus:ring-blue-200"
-              )}
-            />
+            </Label>
+            <div className="relative">
+              <Input
+                id="pickup"
+                value={pickupQuery}
+                onChange={(event) => {
+                  clearPickupSelection();
+                  setPickupQuery(event.target.value);
+                }}
+                placeholder="Search pickup location"
+                className={cn(
+                  "h-auto rounded-2xl px-4 py-3 text-base text-slate-900 focus-visible:ring-2",
+                  pickupSelection ? "border-blue-300 focus:ring-blue-200" : "border-slate-200 focus:ring-blue-200"
+                )}
+              />
+            </div>
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-slate-500">{pickupInstructions}</p>
               {isLoadingSuggestions ? (
-                <span className="text-sm text-blue-600">Loading suggestions...</span>
+                <span className="text-sm text-blue-600 animate-pulse">Loading suggestions...</span>
               ) : null}
             </div>
             {pickupSuggestions.length > 0 && (
@@ -196,7 +240,8 @@ export function FareCalculator() {
                     <button
                       type="button"
                       onClick={() => handleSelectPickup(option)}
-                      className="w-full rounded-2xl px-4 py-3 text-left text-slate-700 transition hover:bg-slate-100"
+                      disabled={isLoadingDetails}
+                      className="w-full rounded-2xl px-4 py-3 text-left text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                     >
                       {option.description}
                     </button>
@@ -207,23 +252,30 @@ export function FareCalculator() {
           </div>
 
           <div className="grid gap-3">
-            <label htmlFor="dropoff" className="text-sm font-medium text-slate-700">
+            <Label htmlFor="dropoff" className="text-slate-700">
               Drop location
-            </label>
-            <input
-              id="dropoff"
-              value={dropoffQuery}
-              onChange={(event) => {
-                clearDropoffSelection();
-                setDropoffQuery(event.target.value);
-              }}
-              placeholder="Search drop location"
-              className={cn(
-                "w-full rounded-2xl border px-4 py-3 text-slate-900 outline-none transition focus:ring-2",
-                dropoffSelection ? "border-blue-300 focus:ring-blue-200" : "border-slate-200 focus:ring-blue-200"
-              )}
-            />
-            <p className="text-sm text-slate-500">{dropoffInstructions}</p>
+            </Label>
+            <div className="relative">
+              <Input
+                id="dropoff"
+                value={dropoffQuery}
+                onChange={(event) => {
+                  clearDropoffSelection();
+                  setDropoffQuery(event.target.value);
+                }}
+                placeholder="Search drop location"
+                className={cn(
+                  "h-auto rounded-2xl px-4 py-3 text-base text-slate-900 focus-visible:ring-2",
+                  dropoffSelection ? "border-blue-300 focus:ring-blue-200" : "border-slate-200 focus:ring-blue-200"
+                )}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-slate-500">{dropoffInstructions}</p>
+              {isLoadingSuggestions ? (
+                <span className="text-sm text-blue-600 animate-pulse">Loading suggestions...</span>
+              ) : null}
+            </div>
             {dropoffSuggestions.length > 0 && (
               <ul className="max-h-64 overflow-auto rounded-3xl border border-slate-200 bg-slate-50 p-2 shadow-sm">
                 {dropoffSuggestions.map((option) => (
@@ -231,7 +283,8 @@ export function FareCalculator() {
                     <button
                       type="button"
                       onClick={() => handleSelectDropoff(option)}
-                      className="w-full rounded-2xl px-4 py-3 text-left text-slate-700 transition hover:bg-slate-100"
+                      disabled={isLoadingDetails}
+                      className="w-full rounded-2xl px-4 py-3 text-left text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
                     >
                       {option.description}
                     </button>
@@ -242,37 +295,47 @@ export function FareCalculator() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-700">Special charges</span>
-              <input
+            <div className="space-y-2">
+              <Label htmlFor="specialCharges" className="text-slate-700">
+                Special charges
+              </Label>
+              <Input
+                id="specialCharges"
                 type="number"
                 step="0.5"
                 min="0"
                 value={specialCharges}
                 onChange={(event) => setSpecialCharges(Number(event.target.value))}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+                className="h-auto rounded-2xl border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 focus-visible:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-200"
                 placeholder="Toll, waiting, luggage"
               />
-            </label>
+            </div>
 
-            <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <div>
-                <p className="text-sm font-medium text-slate-700">Night surcharge</p>
+                <Label htmlFor="nightSurcharge" className="text-slate-700">
+                  Night surcharge
+                </Label>
                 <p className="text-sm text-slate-500">20% after 10 PM</p>
               </div>
-              <input
-                type="checkbox"
+              <Checkbox
+                id="nightSurcharge"
                 checked={nightSurcharge}
-                onChange={(event) => setNightSurcharge(event.target.checked)}
-                className="h-5 w-5 rounded border border-slate-300 bg-white text-blue-600 focus:ring-blue-300"
+                onCheckedChange={(checked) => setNightSurcharge(checked === true)}
               />
-            </label>
+            </div>
           </div>
+
+          {isLoadingDetails ? (
+            <p className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 animate-pulse">
+              Resolving coordinates... Please wait.
+            </p>
+          ) : null}
 
           {errorMessage ? <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</p> : null}
 
-          <Button type="submit" className="rounded-full px-6 py-3" size="lg">
-            {isLoadingDistance ? "Calculating..." : "Calculate fare"}
+          <Button type="submit" className="rounded-full px-6 py-3" size="lg" disabled={isLoadingDistance || isLoadingDetails}>
+            {isLoadingDistance ? "Calculating route..." : "Calculate fare"}
           </Button>
         </form>
       </div>

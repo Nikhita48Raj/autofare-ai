@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getServerEnv } from "@/lib/env";
+
 const distanceRequestSchema = z.object({
   origin: z.object({
     lat: z.number().finite(),
@@ -12,36 +14,46 @@ const distanceRequestSchema = z.object({
   }),
 });
 
-interface OpenRouteServiceResponse {
-  routes?: Array<{
-    summary?: {
-      distance?: number;
-    };
-  }>;
-  features?: Array<{
-    properties?: {
-      summary?: {
-        distance?: number;
+interface GoogleDistanceMatrixResponse {
+  rows?: Array<{
+    elements?: Array<{
+      distance?: {
+        value?: number;
       };
-    };
+      status: string;
+    }>;
   }>;
+  status: string;
+  error_message?: string;
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENROUTESERVICE_API_KEY;
-
-  if (!apiKey) {
+  let env;
+  try {
+    env = getServerEnv();
+  } catch (error) {
+    console.error("Environment variables validation failed:", error);
     return NextResponse.json(
-      { error: "Missing OPENROUTESERVICE_API_KEY." },
+      { error: "Server environment misconfiguration." },
       { status: 500 }
     );
   }
 
-  const parsedBody = distanceRequestSchema.safeParse(await request.json());
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid JSON body." },
+      { status: 400 }
+    );
+  }
+
+  const parsedBody = distanceRequestSchema.safeParse(body);
 
   if (!parsedBody.success) {
     return NextResponse.json(
-      { error: "Invalid distance request." },
+      { error: "Invalid distance request parameters. Must specify origin and destination with lat/lng coordinates." },
       { status: 400 }
     );
   }
@@ -49,63 +61,77 @@ export async function POST(request: Request) {
   const { origin, destination } = parsedBody.data;
   const fallbackDistanceKm = estimateRoadDistanceKm(origin, destination);
 
-  let response: Response;
+  const apiKey = env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  if (!apiKey || apiKey.includes("placeholder") || apiKey.includes("mock-")) {
+    return NextResponse.json({
+      distanceKm: fallbackDistanceKm,
+      source: "fallback",
+      warning: "Using simulated road distance (mock API key).",
+    });
+  }
+
+  const params = new URLSearchParams({
+    origins: `${origin.lat},${origin.lng}`,
+    destinations: `${destination.lat},${destination.lng}`,
+    mode: "driving",
+    key: apiKey,
+  });
 
   try {
-    response = await fetch(
-      "https://api.openrouteservice.org/v2/directions/driving-car",
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/distancematrix/json?${params.toString()}`,
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: apiKey,
+        next: {
+          revalidate: 24 * 60 * 60, // Cache distance calculations for 24 hours
         },
-        body: JSON.stringify({
-          coordinates: [
-            [origin.lng, origin.lat],
-            [destination.lng, destination.lat],
-          ],
-        }),
       }
     );
-  } catch {
-    return NextResponse.json(
-      {
+
+    if (!response.ok) {
+      return NextResponse.json({
         distanceKm: fallbackDistanceKm,
         source: "fallback",
-        warning: "Routing provider is unreachable. Used an approximate distance.",
-      },
-      { status: 200 }
-    );
-  }
+        warning: `Google Distance Matrix request failed (HTTP ${response.status}). Used an approximate distance.`,
+      });
+    }
 
-  if (!response.ok) {
-    const errorText = await response.text();
+    const data = (await response.json()) as GoogleDistanceMatrixResponse;
 
+    if (data.status !== "OK") {
+      console.error("Google Distance Matrix API error status:", data.status, data.error_message);
+      return NextResponse.json({
+        distanceKm: fallbackDistanceKm,
+        source: "fallback",
+        warning: `Google API returned status: ${data.status}. Used an approximate distance.`,
+      });
+    }
+
+    const element = data.rows?.[0]?.elements?.[0];
+
+    if (!element || element.status !== "OK" || typeof element.distance?.value !== "number") {
+      console.warn("Distance Matrix elements check failed status:", element?.status);
+      return NextResponse.json({
+        distanceKm: fallbackDistanceKm,
+        source: "fallback",
+        warning: "Unable to find a valid driving route. Used an approximate distance.",
+      });
+    }
+
+    const distanceMeters = element.distance.value;
+    const distanceKm = Math.round((distanceMeters / 1000) * 100) / 100;
+
+    return NextResponse.json({
+      distanceKm,
+      source: "google-maps",
+    });
+  } catch (error) {
+    console.error("Distance Matrix fetch error:", error);
     return NextResponse.json({
       distanceKm: fallbackDistanceKm,
       source: "fallback",
-      warning: `Routing provider failed. Used an approximate distance. ${errorText}`,
+      warning: "Failed to connect to Google Distance Matrix. Used an approximate distance.",
     });
   }
-
-  const data = (await response.json()) as OpenRouteServiceResponse;
-  const distanceMeters =
-    data.routes?.[0]?.summary?.distance ??
-    data.features?.[0]?.properties?.summary?.distance;
-
-  if (typeof distanceMeters !== "number") {
-    return NextResponse.json({
-      distanceKm: fallbackDistanceKm,
-      source: "fallback",
-      warning: "Unable to parse route distance. Used an approximate distance.",
-    });
-  }
-
-  return NextResponse.json({
-    distanceKm: Math.round((distanceMeters / 1000) * 100) / 100,
-    source: "openrouteservice",
-  });
 }
 
 const estimateRoadDistanceKm = (
@@ -125,6 +151,7 @@ const estimateRoadDistanceKm = (
   const straightLineKm =
     2 * earthRadiusKm * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
 
+  // 1.3 is a typical routing curvature factor for urban Indian driving routes
   return Math.round(straightLineKm * 1.3 * 100) / 100;
 };
 
