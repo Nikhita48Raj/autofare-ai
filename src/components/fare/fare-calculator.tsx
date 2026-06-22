@@ -40,6 +40,10 @@ export function FareCalculator() {
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
+  // ML Prediction Fields
+  const [predictedOvercharge, setPredictedOvercharge] = useState<number | null>(null);
+  const [mlSource, setMlSource] = useState<string | null>(null);
+
   // Dispute and Overcharge Reporting Fields
   const [actualFare, setActualFare] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
@@ -143,6 +147,8 @@ export function FareCalculator() {
     setEstimate(null);
     setActualFare(null);
     setNotes("");
+    setPredictedOvercharge(null);
+    setMlSource(null);
 
     if (!formSchema.pickup(pickupQuery) || !formSchema.dropoff(dropoffQuery)) {
       setErrorMessage("Please enter valid pickup and drop locations.");
@@ -184,6 +190,35 @@ export function FareCalculator() {
 
       const result = calculateFareEstimate(distanceKm, specialCharges, nightSurcharge);
       setEstimate(result);
+
+      // Trigger ML Prediction in parallel
+      fetch("/api/predict", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pickup_lat: pickupSelection.lat,
+          pickup_lng: pickupSelection.lng,
+          drop_lat: dropoffSelection.lat,
+          drop_lng: dropoffSelection.lng,
+          distance_km: distanceKm,
+        }),
+      })
+        .then((res) => {
+          if (res.ok) return res.json();
+          throw new Error("ML Predict API request failed.");
+        })
+        .then((data: any) => {
+          if (typeof data.predicted_overcharge === "number") {
+            setPredictedOvercharge(data.predicted_overcharge);
+            setMlSource(data.source || "xgboost_model");
+          }
+        })
+        .catch((error) => {
+          console.warn("Prediction endpoint query error:", error);
+        });
+
     } catch (error) {
       console.error(error);
       setErrorMessage(
@@ -418,6 +453,25 @@ export function FareCalculator() {
                 <p className="mt-3 text-3xl font-semibold">Rs. {estimate.streetFare.toFixed(2)}</p>
                 <p className="mt-2 text-sm text-slate-400">Expected street price for bargaining or dispute reporting.</p>
               </div>
+
+              {/* ML Predicted Overcharge Panel */}
+              {predictedOvercharge !== null && (
+                <div className="rounded-[1.5rem] border border-blue-100 bg-blue-50/50 p-5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-blue-700">ML Overcharge Predictor</h4>
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800 uppercase tracking-wider scale-90 origin-right">
+                      {mlSource === "xgboost_model" ? "XGBoost Active" : "Heuristic Active"}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900 leading-snug">
+                    ML predicts a typical overcharge of <strong className="font-extrabold text-blue-700">Rs. {predictedOvercharge.toFixed(0)}</strong> above meter for this trip.
+                  </p>
+                  <p className="text-[10px] text-slate-500 leading-normal">
+                    Calculated using distance, coordinates, and local hotspot statistics.
+                  </p>
+                </div>
+              )}
+
               <div className="grid gap-3 rounded-[1.5rem] bg-slate-50 p-4">
                 <div className="flex items-center justify-between text-slate-700">
                   <span>Base fare</span>
