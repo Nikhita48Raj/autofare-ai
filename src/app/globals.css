@@ -1,12 +1,9 @@
+/* Tailwind v4 — use @import, NOT @tailwind directives (those are v3 only) */
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
 @custom-variant dark (&:is(.dark *));
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 :root {
   color-scheme: light;

@@ -8,7 +8,8 @@ const publicEnvSchema = z.object({
 });
 
 const serverEnvSchema = publicEnvSchema.extend({
-  OPENROUTESERVICE_API_KEY: z.string().min(1),
+  // Optional: reserved for future OpenRouteService integration. Not used by any route currently.
+  OPENROUTESERVICE_API_KEY: z.string().min(1).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 });
 

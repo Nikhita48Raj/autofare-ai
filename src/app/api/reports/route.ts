@@ -23,7 +23,7 @@ const ipCache = new Map<string, number[]>();
 
 // Periodically clean up expired entries from our cache map every 10 minutes to prevent memory leaks
 if (typeof globalThis !== "undefined") {
-  const globalAny = globalThis as any;
+  const globalAny = globalThis as unknown as { rateLimiterInterval?: NodeJS.Timeout };
   if (!globalAny.rateLimiterInterval) {
     globalAny.rateLimiterInterval = setInterval(() => {
       const now = Date.now();
@@ -86,6 +86,7 @@ export async function POST(request: Request) {
   try {
     const supabase = createSupabaseServerClient();
     
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     const { data, error } = await supabase
       .from("fare_reports")
       .insert({
@@ -116,7 +117,8 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ id: (data as any).id }, { status: 201 });
+    return NextResponse.json({ id: (data as any)?.id }, { status: 201 });
+    /* eslint-enable @typescript-eslint/no-explicit-any */
   } catch (error) {
     console.error("Dispute submission server error:", error);
     // If client instantiation fails due to missing environment variables

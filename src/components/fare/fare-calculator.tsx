@@ -8,15 +8,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { calculateFareEstimate, type FareEstimate } from "@/lib/fare";
-import { estimateDistanceKm, fetchGoogleSuggestions, fetchPlaceDetails, type GoogleSuggestion } from "@/lib/maps";
+import {
+  estimateDistanceKm,
+  fetchGoogleSuggestions,
+  fetchPlaceDetails,
+  type GoogleSuggestion,
+} from "@/lib/maps";
 import { cn } from "@/lib/utils";
-
-interface LocationOption {
-  description: string;
-  placeId: string;
-  lat?: number;
-  lng?: number;
-}
+// BUG-02 FIX: Wire the Zustand store so state is shared across the app,
+// not siloed exclusively inside this component.
+import { useFareStore } from "@/stores/fare-store";
 
 const formSchema = {
   pickup: (value: string) => value.trim().length >= 3,
@@ -26,48 +27,76 @@ const formSchema = {
 export function FareCalculator() {
   const router = useRouter();
 
-  const [pickupQuery, setPickupQuery] = useState("");
-  const [dropoffQuery, setDropoffQuery] = useState("");
-  const [pickupSelection, setPickupSelection] = useState<LocationOption | null>(null);
-  const [dropoffSelection, setDropoffSelection] = useState<LocationOption | null>(null);
-  const [pickupSuggestions, setPickupSuggestions] = useState<GoogleSuggestion[]>([]);
-  const [dropoffSuggestions, setDropoffSuggestions] = useState<GoogleSuggestion[]>([]);
-  const [specialCharges, setSpecialCharges] = useState(0);
-  const [nightSurcharge, setNightSurcharge] = useState(false);
-  const [estimate, setEstimate] = useState<FareEstimate | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // ── Shared state via Zustand store ───────────────────────────────────────
+  // BUG-02 FIX: replaced 4 isolated useStates with the Zustand store so any
+  // future component (e.g. a map panel) can subscribe to the same values.
+  const {
+    pickup: pickupSelection,
+    dropoff: dropoffSelection,
+    nightSurcharge,
+    specialCharges,
+    setPickup,
+    setDropoff,
+    setNightSurcharge,
+    setSpecialCharges,
+  } = useFareStore();
+
+  // ── Local autocomplete UI state (does not need to be global) ────────────
+  const [pickupQuery, setPickupQuery] = useState(
+    pickupSelection?.description ?? ""
+  );
+  const [dropoffQuery, setDropoffQuery] = useState(
+    dropoffSelection?.description ?? ""
+  );
+  const [pickupSuggestions, setPickupSuggestions] = useState<
+    GoogleSuggestion[]
+  >([]);
+  const [dropoffSuggestions, setDropoffSuggestions] = useState<
+    GoogleSuggestion[]
+  >([]);
+
+  // ── Loading states ────────────────────────────────────────────────────────
   const [isLoadingDistance, setIsLoadingDistance] = useState(false);
-  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  // BUG-09 FIX: Split the single isLoadingSuggestions boolean into two
+  // independent flags so pickup and dropoff spinners don't interfere.
+  const [isLoadingPickupSuggestions, setIsLoadingPickupSuggestions] =
+    useState(false);
+  const [isLoadingDropoffSuggestions, setIsLoadingDropoffSuggestions] =
+    useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
-  // ML Prediction Fields
-  const [predictedOvercharge, setPredictedOvercharge] = useState<number | null>(null);
+  // ── ML Prediction ─────────────────────────────────────────────────────────
+  const [predictedOvercharge, setPredictedOvercharge] = useState<
+    number | null
+  >(null);
   const [mlSource, setMlSource] = useState<string | null>(null);
 
-  // Dispute and Overcharge Reporting Fields
+  // ── Results ───────────────────────────────────────────────────────────────
+  const [estimate, setEstimate] = useState<FareEstimate | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // ── Dispute / overcharge form ─────────────────────────────────────────────
   const [actualFare, setActualFare] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  // BUG-05 FIX: track whether user tried to submit without entering demanded fare
+  const [actualFareWarning, setActualFareWarning] = useState(false);
 
-  const clearPickupSelection = () => {
-    setPickupSelection(null);
-  };
+  // ── Clear selection helpers ───────────────────────────────────────────────
+  const clearPickupSelection = () => setPickup(null);
+  const clearDropoffSelection = () => setDropoff(null);
 
-  const clearDropoffSelection = () => {
-    setDropoffSelection(null);
-  };
-
-  const fetchSuggestions = async (
+  // ── Autocomplete fetcher ──────────────────────────────────────────────────
+  const fetchSuggestionsFor = async (
     query: string,
-    setter: React.Dispatch<React.SetStateAction<GoogleSuggestion[]>>
+    setter: React.Dispatch<React.SetStateAction<GoogleSuggestion[]>>,
+    loadingSetter: React.Dispatch<React.SetStateAction<boolean>>
   ) => {
     if (query.trim().length < 3) {
       setter([]);
       return;
     }
-
-    setIsLoadingSuggestions(true);
-
+    loadingSetter(true);
     try {
       const results = await fetchGoogleSuggestions(query);
       setter(results);
@@ -75,16 +104,18 @@ export function FareCalculator() {
       console.error("Autocomplete error", error);
       setter([]);
     } finally {
-      setIsLoadingSuggestions(false);
+      loadingSetter(false);
     }
   };
 
+  // ── Place selection handlers ──────────────────────────────────────────────
   const handleSelectPickup = async (option: GoogleSuggestion) => {
     setErrorMessage(null);
     setIsLoadingDetails(true);
     try {
       const coords = await fetchPlaceDetails(option.placeId);
-      setPickupSelection({
+      // Store only after coordinates are fully resolved — lat/lng guaranteed non-null
+      setPickup({
         description: option.description,
         placeId: option.placeId,
         lat: coords.lat,
@@ -94,7 +125,9 @@ export function FareCalculator() {
       setPickupSuggestions([]);
     } catch (error) {
       console.error("Failed to fetch coordinates for selection", error);
-      setErrorMessage("Could not resolve the selected location coordinates. Please try again.");
+      setErrorMessage(
+        "Could not resolve the selected location coordinates. Please try again."
+      );
     } finally {
       setIsLoadingDetails(false);
     }
@@ -105,7 +138,7 @@ export function FareCalculator() {
     setIsLoadingDetails(true);
     try {
       const coords = await fetchPlaceDetails(option.placeId);
-      setDropoffSelection({
+      setDropoff({
         description: option.description,
         placeId: option.placeId,
         lat: coords.lat,
@@ -115,32 +148,45 @@ export function FareCalculator() {
       setDropoffSuggestions([]);
     } catch (error) {
       console.error("Failed to fetch coordinates for selection", error);
-      setErrorMessage("Could not resolve the selected location coordinates. Please try again.");
+      setErrorMessage(
+        "Could not resolve the selected location coordinates. Please try again."
+      );
     } finally {
       setIsLoadingDetails(false);
     }
   };
 
+  // ── Debounced autocomplete triggers ──────────────────────────────────────
+  // BUG-12 FIX: Use bare setTimeout (global) instead of window.setTimeout.
+  // window.setTimeout is unnecessary in a "use client" component and fails
+  // in non-browser test environments.
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const timer = setTimeout(() => {
       if (pickupSelection?.description !== pickupQuery) {
-        fetchSuggestions(pickupQuery, setPickupSuggestions);
+        fetchSuggestionsFor(
+          pickupQuery,
+          setPickupSuggestions,
+          setIsLoadingPickupSuggestions
+        );
       }
     }, 250);
-
-    return () => window.clearTimeout(timer);
+    return () => clearTimeout(timer);
   }, [pickupQuery, pickupSelection]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const timer = setTimeout(() => {
       if (dropoffSelection?.description !== dropoffQuery) {
-        fetchSuggestions(dropoffQuery, setDropoffSuggestions);
+        fetchSuggestionsFor(
+          dropoffQuery,
+          setDropoffSuggestions,
+          setIsLoadingDropoffSuggestions
+        );
       }
     }, 250);
-
-    return () => window.clearTimeout(timer);
+    return () => clearTimeout(timer);
   }, [dropoffQuery, dropoffSelection]);
 
+  // ── Fare calculation ──────────────────────────────────────────────────────
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage(null);
@@ -149,29 +195,25 @@ export function FareCalculator() {
     setNotes("");
     setPredictedOvercharge(null);
     setMlSource(null);
+    setActualFareWarning(false);
 
-    if (!formSchema.pickup(pickupQuery) || !formSchema.dropoff(dropoffQuery)) {
+    if (
+      !formSchema.pickup(pickupQuery) ||
+      !formSchema.dropoff(dropoffQuery)
+    ) {
       setErrorMessage("Please enter valid pickup and drop locations.");
       return;
     }
 
     if (!pickupSelection || !dropoffSelection) {
-      setErrorMessage("Please select both pickup and drop locations from the suggestions.");
+      setErrorMessage(
+        "Please select both pickup and drop locations from the suggestions."
+      );
       return;
     }
 
     if (pickupSelection.placeId === dropoffSelection.placeId) {
       setErrorMessage("Pickup and drop locations must be different.");
-      return;
-    }
-
-    if (
-      pickupSelection.lat === undefined ||
-      pickupSelection.lng === undefined ||
-      dropoffSelection.lat === undefined ||
-      dropoffSelection.lng === undefined
-    ) {
-      setErrorMessage("Coordinates are not yet resolved. Please select the location again.");
       return;
     }
 
@@ -188,15 +230,17 @@ export function FareCalculator() {
         { lat: dropoffSelection.lat, lng: dropoffSelection.lng }
       );
 
-      const result = calculateFareEstimate(distanceKm, specialCharges, nightSurcharge);
+      const result = calculateFareEstimate(
+        distanceKm,
+        specialCharges,
+        nightSurcharge
+      );
       setEstimate(result);
 
-      // Trigger ML Prediction in parallel
+      // Trigger ML Prediction in parallel — never blocks the UI
       fetch("/api/predict", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pickup_lat: pickupSelection.lat,
           pickup_lng: pickupSelection.lng,
@@ -209,7 +253,7 @@ export function FareCalculator() {
           if (res.ok) return res.json();
           throw new Error("ML Predict API request failed.");
         })
-        .then((data: any) => {
+        .then((data: { predicted_overcharge?: number; source?: string }) => {
           if (typeof data.predicted_overcharge === "number") {
             setPredictedOvercharge(data.predicted_overcharge);
             setMlSource(data.source || "xgboost_model");
@@ -218,7 +262,6 @@ export function FareCalculator() {
         .catch((error) => {
           console.warn("Prediction endpoint query error:", error);
         });
-
     } catch (error) {
       console.error(error);
       setErrorMessage(
@@ -231,23 +274,26 @@ export function FareCalculator() {
     }
   };
 
+  // ── Dispute submission ────────────────────────────────────────────────────
   const handleShareDispute = async () => {
     if (!pickupSelection || !dropoffSelection || !estimate) return;
 
-    if (pickupSelection.lat === undefined || pickupSelection.lng === undefined || dropoffSelection.lat === undefined || dropoffSelection.lng === undefined) {
-      setErrorMessage("Location coordinates are not resolved.");
+    // BUG-05 FIX: Block submit and show inline warning when demanded fare is missing.
+    // Previously, clicking "Share Dispute Page" with no actualFare silently submitted
+    // an empty report that rendered as "Demanded: Not reported" on the dispute page.
+    if (!actualFare || actualFare <= 0) {
+      setActualFareWarning(true);
       return;
     }
 
+    setActualFareWarning(false);
     setErrorMessage(null);
     setIsSubmittingReport(true);
 
     try {
       const response = await fetch("/api/reports", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           pickup_name: pickupSelection.description,
           drop_name: dropoffSelection.description,
@@ -266,41 +312,65 @@ export function FareCalculator() {
       });
 
       if (!response.ok) {
-        throw new Error("API call failed.");
+        const errBody = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(errBody?.error ?? "API call failed.");
       }
 
-      const data = (await response.json()) as { id: string; warning?: string };
+      const data = (await response.json()) as {
+        id: string;
+        warning?: string;
+      };
       router.push(`/dispute/${data.id}`);
     } catch (error) {
       console.error("Report submit error:", error);
-      setErrorMessage("Could not submit the dispute report. Please try again.");
+      setErrorMessage(
+        "Could not submit the dispute report. Please try again."
+      );
     } finally {
       setIsSubmittingReport(false);
     }
   };
 
+  // ── Instruction labels ────────────────────────────────────────────────────
   const pickupInstructions = useMemo(
-    () => (pickupSelection ? "Selected from suggestions" : "Choose a pickup location from the list."),
+    () =>
+      pickupSelection
+        ? "✓ Location confirmed"
+        : "Choose a pickup location from the list.",
     [pickupSelection]
   );
 
   const dropoffInstructions = useMemo(
-    () => (dropoffSelection ? "Selected from suggestions" : "Choose a drop location from the list."),
+    () =>
+      dropoffSelection
+        ? "✓ Location confirmed"
+        : "Choose a drop location from the list.",
     [dropoffSelection]
   );
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="grid gap-10 lg:grid-cols-[1.35fr_0.85fr]">
+      {/* ── Left: Input form ── */}
       <div className="space-y-6 rounded-[2rem] border border-slate-200/80 bg-white p-8 shadow-soft">
         <div className="space-y-3">
-          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-700">Fare Calculator</p>
-          <h2 className="text-3xl font-semibold text-slate-950">Estimate routes and dispute fares with confidence.</h2>
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-blue-700">
+            Fare Calculator
+          </p>
+          <h2 className="text-3xl font-semibold text-slate-950">
+            Estimate routes and dispute fares with confidence.
+          </h2>
           <p className="max-w-2xl text-slate-600">
-            Search pickup and drop locations using Google Places API, calculate route distance using Google Distance Matrix, and compare official versus street fare estimates.
+            Search pickup and drop locations using Google Places API, calculate
+            route distance using Google Distance Matrix, and compare official
+            versus street fare estimates.
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="grid gap-6">
+          {/* ── Pickup ── */}
           <div className="grid gap-3">
             <Label htmlFor="pickup" className="text-slate-700">
               Pickup location
@@ -316,14 +386,28 @@ export function FareCalculator() {
                 placeholder="Search pickup location"
                 className={cn(
                   "h-auto rounded-2xl px-4 py-3 text-base text-slate-900 focus-visible:ring-2",
-                  pickupSelection ? "border-blue-300 focus:ring-blue-200" : "border-slate-200 focus:ring-blue-200"
+                  pickupSelection
+                    ? "border-blue-300 focus:ring-blue-200"
+                    : "border-slate-200 focus:ring-blue-200"
                 )}
               />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-slate-500">{pickupInstructions}</p>
-              {isLoadingSuggestions ? (
-                <span className="text-sm text-blue-600 animate-pulse">Loading suggestions...</span>
+              <p
+                className={cn(
+                  "text-sm",
+                  pickupSelection
+                    ? "font-medium text-blue-600"
+                    : "text-slate-500"
+                )}
+              >
+                {pickupInstructions}
+              </p>
+              {/* BUG-09 FIX: now uses the dedicated pickup loading flag */}
+              {isLoadingPickupSuggestions ? (
+                <span className="animate-pulse text-sm text-blue-600">
+                  Searching…
+                </span>
               ) : null}
             </div>
             {pickupSuggestions.length > 0 && (
@@ -344,6 +428,7 @@ export function FareCalculator() {
             )}
           </div>
 
+          {/* ── Dropoff ── */}
           <div className="grid gap-3">
             <Label htmlFor="dropoff" className="text-slate-700">
               Drop location
@@ -359,14 +444,28 @@ export function FareCalculator() {
                 placeholder="Search drop location"
                 className={cn(
                   "h-auto rounded-2xl px-4 py-3 text-base text-slate-900 focus-visible:ring-2",
-                  dropoffSelection ? "border-blue-300 focus:ring-blue-200" : "border-slate-200 focus:ring-blue-200"
+                  dropoffSelection
+                    ? "border-blue-300 focus:ring-blue-200"
+                    : "border-slate-200 focus:ring-blue-200"
                 )}
               />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-slate-500">{dropoffInstructions}</p>
-              {isLoadingSuggestions ? (
-                <span className="text-sm text-blue-600 animate-pulse">Loading suggestions...</span>
+              <p
+                className={cn(
+                  "text-sm",
+                  dropoffSelection
+                    ? "font-medium text-blue-600"
+                    : "text-slate-500"
+                )}
+              >
+                {dropoffInstructions}
+              </p>
+              {/* BUG-09 FIX: now uses the dedicated dropoff loading flag */}
+              {isLoadingDropoffSuggestions ? (
+                <span className="animate-pulse text-sm text-blue-600">
+                  Searching…
+                </span>
               ) : null}
             </div>
             {dropoffSuggestions.length > 0 && (
@@ -387,6 +486,7 @@ export function FareCalculator() {
             )}
           </div>
 
+          {/* ── Special charges + Night surcharge ── */}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="specialCharges" className="text-slate-700">
@@ -398,7 +498,9 @@ export function FareCalculator() {
                 step="0.5"
                 min="0"
                 value={specialCharges}
-                onChange={(event) => setSpecialCharges(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpecialCharges(Number(event.target.value))
+                }
                 className="h-auto rounded-2xl border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-900 focus-visible:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-200"
                 placeholder="Toll, waiting, luggage"
               />
@@ -414,115 +516,183 @@ export function FareCalculator() {
               <Checkbox
                 id="nightSurcharge"
                 checked={nightSurcharge}
-                onCheckedChange={(checked) => setNightSurcharge(checked === true)}
+                onCheckedChange={(checked) =>
+                  setNightSurcharge(checked === true)
+                }
               />
             </div>
           </div>
 
           {isLoadingDetails ? (
-            <p className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 animate-pulse">
-              Resolving coordinates... Please wait.
+            <p className="animate-pulse rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+              Resolving coordinates… Please wait.
             </p>
           ) : null}
 
-          {errorMessage ? <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{errorMessage}</p> : null}
+          {errorMessage ? (
+            <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {errorMessage}
+            </p>
+          ) : null}
 
-          <Button type="submit" className="rounded-full px-6 py-3" size="lg" disabled={isLoadingDistance || isLoadingDetails}>
-            {isLoadingDistance ? "Calculating route..." : "Calculate fare"}
+          <Button
+            type="submit"
+            className="rounded-full px-6 py-3"
+            size="lg"
+            disabled={isLoadingDistance || isLoadingDetails}
+          >
+            {isLoadingDistance ? "Calculating route…" : "Calculate fare"}
           </Button>
         </form>
       </div>
 
+      {/* ── Right: Results panel ── */}
       <div className="space-y-6">
         <div className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-soft">
-          <h3 className="text-xl font-semibold text-slate-950">Estimated fare output</h3>
+          <h3 className="text-xl font-semibold text-slate-950">
+            Estimated fare output
+          </h3>
           {estimate ? (
             <div className="mt-6 space-y-6">
+              {/* Distance + Official fare */}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-3xl bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">Distance</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-950">{estimate.distanceKm} km</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-950">
+                    {estimate.distanceKm} km
+                  </p>
                 </div>
                 <div className="rounded-3xl bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">Official fare</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-950">Rs. {estimate.officialFare.toFixed(2)}</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-950">
+                    ₹{estimate.officialFare.toFixed(2)}
+                  </p>
                 </div>
               </div>
+
+              {/* Street fare */}
               <div className="rounded-[1.5rem] bg-slate-950 p-6 text-white">
-                <p className="text-sm uppercase tracking-[0.2em] text-slate-400">Street fare</p>
-                <p className="mt-3 text-3xl font-semibold">Rs. {estimate.streetFare.toFixed(2)}</p>
-                <p className="mt-2 text-sm text-slate-400">Expected street price for bargaining or dispute reporting.</p>
+                <p className="text-sm uppercase tracking-[0.2em] text-slate-400">
+                  Street fare
+                </p>
+                <p className="mt-3 text-3xl font-semibold">
+                  ₹{estimate.streetFare.toFixed(2)}
+                </p>
+                <p className="mt-2 text-sm text-slate-400">
+                  Expected street price for bargaining or dispute reporting.
+                </p>
               </div>
 
               {/* ML Predicted Overcharge Panel */}
               {predictedOvercharge !== null && (
-                <div className="rounded-[1.5rem] border border-blue-100 bg-blue-50/50 p-5 space-y-2">
+                <div className="space-y-2 rounded-[1.5rem] border border-blue-100 bg-blue-50/50 p-5">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-blue-700">ML Overcharge Predictor</h4>
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800 uppercase tracking-wider scale-90 origin-right">
-                      {mlSource === "xgboost_model" ? "XGBoost Active" : "Heuristic Active"}
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-blue-700">
+                      ML Overcharge Predictor
+                    </h4>
+                    <span className="origin-right scale-90 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-800">
+                      {mlSource === "xgboost_model"
+                        ? "XGBoost Active"
+                        : "Heuristic Active"}
                     </span>
                   </div>
-                  <p className="text-sm font-semibold text-slate-900 leading-snug">
-                    ML predicts a typical overcharge of <strong className="font-extrabold text-blue-700">Rs. {predictedOvercharge.toFixed(0)}</strong> above meter for this trip.
+                  <p className="text-sm font-semibold leading-snug text-slate-900">
+                    ML predicts a typical overcharge of{" "}
+                    <strong className="font-extrabold text-blue-700">
+                      ₹{predictedOvercharge.toFixed(0)}
+                    </strong>{" "}
+                    above meter for this trip.
                   </p>
-                  <p className="text-[10px] text-slate-500 leading-normal">
-                    Calculated using distance, coordinates, and local hotspot statistics.
+                  <p className="text-[10px] leading-normal text-slate-500">
+                    Calculated using distance, coordinates, and local hotspot
+                    statistics.
                   </p>
                 </div>
               )}
 
+              {/* Fare breakdown */}
               <div className="grid gap-3 rounded-[1.5rem] bg-slate-50 p-4">
                 <div className="flex items-center justify-between text-slate-700">
                   <span>Base fare</span>
-                  <span>Rs. {estimate.baseFare.toFixed(2)}</span>
+                  <span>₹{estimate.baseFare.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-700">
                   <span>Distance fare</span>
-                  <span>Rs. {estimate.distanceFare.toFixed(2)}</span>
+                  <span>₹{estimate.distanceFare.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-700">
                   <span>Night surcharge</span>
-                  <span>Rs. {estimate.nightSurchargeAmount.toFixed(2)}</span>
+                  <span>₹{estimate.nightSurchargeAmount.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center justify-between text-slate-700">
                   <span>Special charges</span>
-                  <span>Rs. {estimate.specialCharges.toFixed(2)}</span>
+                  <span>₹{estimate.specialCharges.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-950">
                   <span>Total</span>
-                  <span>Rs. {estimate.totalFare.toFixed(2)}</span>
+                  <span>₹{estimate.totalFare.toFixed(2)}</span>
                 </div>
               </div>
 
-              {/* Overcharge / Dispute Submission Box */}
-              <div className="border-t border-slate-200 pt-6 space-y-4">
+              {/* Dispute Submission Box */}
+              <div className="space-y-4 border-t border-slate-200 pt-6">
                 <div>
-                  <h4 className="text-base font-semibold text-slate-950">Did you get overcharged?</h4>
-                  <p className="mt-1 text-xs text-slate-500">Generate a dispute page to share on social media or report to the community.</p>
+                  <h4 className="text-base font-semibold text-slate-950">
+                    Did you get overcharged?
+                  </h4>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Generate a dispute page to share on social media or report
+                    to the community.
+                  </p>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="actualFare" className="text-slate-700 text-xs font-semibold">Actual fare demanded (Rs.)</Label>
+                  <Label
+                    htmlFor="actualFare"
+                    className="text-xs font-semibold text-slate-700"
+                  >
+                    Actual fare demanded (₹){" "}
+                    <span className="text-red-500">*</span>
+                  </Label>
                   <Input
                     id="actualFare"
                     type="number"
                     min="0"
                     placeholder="What did the driver ask for?"
                     value={actualFare ?? ""}
-                    onChange={(event) => setActualFare(Number(event.target.value) || null)}
-                    className="h-auto rounded-xl border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-950 focus-visible:ring-1 focus-visible:ring-blue-300"
+                    onChange={(event) => {
+                      setActualFare(Number(event.target.value) || null);
+                      if (actualFareWarning) setActualFareWarning(false);
+                    }}
+                    className={cn(
+                      "h-auto rounded-xl px-3 py-2 text-sm text-slate-950 focus-visible:ring-1 focus-visible:ring-blue-300",
+                      actualFareWarning
+                        ? "border-red-400 bg-red-50"
+                        : "border-slate-200 bg-slate-50"
+                    )}
                   />
+                  {/* BUG-05 FIX: Inline warning instead of silently submitting */}
+                  {actualFareWarning && (
+                    <p className="text-xs font-medium text-red-600">
+                      Please enter the fare the driver demanded before
+                      generating a dispute page.
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="notes" className="text-slate-700 text-xs font-semibold">Driver behavior / remarks</Label>
+                  <Label
+                    htmlFor="notes"
+                    className="text-xs font-semibold text-slate-700"
+                  >
+                    Driver behavior / remarks
+                  </Label>
                   <textarea
                     id="notes"
-                    placeholder="E.g., Refused to turn on the meter, demanded flat Rs. 300, rain surcharge, luggage issues..."
+                    placeholder="E.g., Refused to turn on the meter, demanded flat ₹300, rain surcharge, luggage issues…"
                     value={notes}
                     onChange={(event) => setNotes(event.target.value)}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-950 outline-none focus:ring-1 focus:ring-blue-300 min-h-[80px] font-sans"
+                    className="min-h-[80px] w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-sans text-sm text-slate-950 outline-none focus:ring-1 focus:ring-blue-300"
                   />
                 </div>
 
@@ -532,13 +702,17 @@ export function FareCalculator() {
                   disabled={isSubmittingReport}
                   className="w-full rounded-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold transition shadow-sm hover:shadow"
                 >
-                  {isSubmittingReport ? "Generating dispute page..." : "Share Dispute Page"}
+                  {isSubmittingReport
+                    ? "Generating dispute page…"
+                    : "Share Dispute Page"}
                 </Button>
               </div>
             </div>
           ) : (
             <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-slate-50 p-8 text-slate-600">
-              <p className="text-base font-medium">Complete the form to generate an estimate.</p>
+              <p className="text-base font-medium">
+                Complete the form to generate an estimate.
+              </p>
             </div>
           )}
         </div>

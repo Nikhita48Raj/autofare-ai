@@ -31,26 +31,26 @@ def heuristic_fallback(pickup_lat, pickup_lng, distance_km, hour, day_of_week):
     """Deterministic fallback estimation in case serialized model files are missing."""
     # Base estimated overcharge
     overcharge = 15.0
-    
+
     # Night hours markup
     if hour >= 22 or hour <= 5:
         overcharge += 50.0
-    elif hour >= 17 and hour <= 20: # Peak evening
+    elif hour >= 17 and hour <= 20:  # Peak evening
         overcharge += 25.0
-        
+
     # Weekends markup
     if day_of_week >= 5:
         overcharge += 15.0
-        
+
     # High-dispute hubs markup
     indiranagar_dist = haversine_distance(pickup_lat, pickup_lng, 12.9718, 77.6411)
     majestic_dist = haversine_distance(pickup_lat, pickup_lng, CENTER_LAT, CENTER_LNG)
     if indiranagar_dist < 2.5 or majestic_dist < 2.0:
         overcharge += 45.0
-        
+
     # Scaling markup based on total distance
     overcharge += min(distance_km * 2.0, 30.0)
-    
+
     return overcharge
 
 def main():
@@ -60,8 +60,9 @@ def main():
             "predicted_overcharge": 0.0
         }))
         sys.exit(1)
-        
-    try {
+
+    # BUG-01 FIX: was `try {` (JavaScript syntax) — Python requires `try:`
+    try:
         pickup_lat = float(sys.argv[1])
         pickup_lng = float(sys.argv[2])
         drop_lat = float(sys.argv[3])
@@ -91,11 +92,11 @@ def main():
     try:
         model = joblib.load(model_path)
         scaler = joblib.load(scaler_path)
-        
+
         # Calculate engineered features
         bearing = calculate_bearing(pickup_lat, pickup_lng, drop_lat, drop_lng)
         dist_to_center = haversine_distance(pickup_lat, pickup_lng, CENTER_LAT, CENTER_LNG)
-        
+
         # Formulate feature vector
         features = np.array([[
             pickup_lat, pickup_lng,
@@ -106,13 +107,13 @@ def main():
             bearing,
             dist_to_center
         ]])
-        
+
         features_scaled = scaler.transform(features)
         prediction = model.predict(features_scaled)[0]
-        
+
         # Overcharge cannot be negative
         predicted_overcharge = max(0.0, float(prediction))
-        
+
         print(json.dumps({
             "predicted_overcharge": round(predicted_overcharge, 2),
             "source": "xgboost_model"

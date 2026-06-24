@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { type FareReport } from "@/types/fare-report";
 import { 
   AnalyticsDashboard, 
   type DashboardStats, 
@@ -95,10 +96,12 @@ export default async function DashboardPage() {
 
   try {
     const supabase = createSupabaseServerClient();
-    const { data: rawReports, error } = await supabase
+    const { data, error } = await supabase
       .from("fare_reports")
       .select("*")
-      .not("actual_fare", "is", null) as any;
+      .not("actual_fare", "is", null);
+
+    const rawReports = data as unknown as FareReport[] | null;
 
     // If database queries fail or return empty, fall back to high-fidelity mock data
     if (error || !rawReports || rawReports.length === 0) {
@@ -109,7 +112,9 @@ export default async function DashboardPage() {
       trend = mock.trend;
       surcharges = mock.surcharges;
     } else {
-      const reports = (rawReports as any[]).filter((r: any) => r.actual_fare !== null);
+      const reports = rawReports.filter(
+        (r): r is FareReport & { actual_fare: number } => r.actual_fare !== null
+      );
       const totalReports = reports.length;
 
       // 1. Calculate General Stats
