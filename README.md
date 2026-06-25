@@ -206,35 +206,6 @@ http://localhost:3000
 
 ---
 
-## 📊 Roadmap
-
-### Phase 1
-
-* [x] Fare Calculator
-* [x] Distance Estimation
-* [x] Fare Breakdown
-
-### Phase 2
-
-* [x] Fare Reports
-* [x] Dispute Mode
-* [x] Analytics Dashboard
-
-### Phase 3
-
-* [ ] Tamil Localization
-* [ ] Auto Stand Locator
-* [ ] Multi-City Support
-
-### Phase 4
-
-* [ ] ML Fare Prediction
-* [ ] Overcharge Detection
-* [ ] Route Risk Scoring
-* [ ] Heatmap Analytics
-
----
-
 ## 🎯 Problem Statement
 
 Millions of commuters across Indian cities face uncertainty regarding auto-rickshaw fares.
@@ -267,4 +238,3 @@ Built by Nikkii as a full-stack + machine learning project focused on solving re
 
 ---
 
-### ⭐ If you find this project useful, consider starring the repository.
