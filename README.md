@@ -1,36 +1,270 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🚕 AutoFare AI
 
-## Getting Started
+### Fair Auto-Rickshaw Fare Estimation & Overcharge Detection Platform
 
-First, run the development server:
+AutoFare AI helps commuters, tourists, and daily travelers estimate fair auto-rickshaw fares using official government rate cards, real-world fare data, and machine learning-powered insights.
+
+Built to solve one of the most common urban transportation problems in India: **"Am I being charged a fair fare?"**
+
+---
+
+## 🌟 Features
+
+### 🚖 Fare Estimator
+
+* Calculate fares between any pickup and drop location
+* Distance calculation using Google Maps APIs
+* Official meter fare estimation
+* Real-world street fare prediction
+
+### 🌙 Night Fare Support
+
+* Automatic night surcharge calculation
+* Accurate fare breakdown for late-night travel
+
+### 💰 Official vs Street Fare
+
+Compare:
+
+* Government-approved fare
+* Expected street fare
+* Estimated negotiation range
+
+### 📊 Fare Breakdown
+
+Detailed fare calculations including:
+
+* Base fare
+* Distance charges
+* Night surcharge
+* Airport surcharge
+* Luggage charges
+* Waiting charges
+
+### 🛡️ Dispute Mode
+
+Generate a shareable fare report showing:
+
+* Route details
+* Official fare
+* Actual fare demanded
+* Overcharge percentage
+
+Useful when resolving fare disputes.
+
+### 📈 Crowdsourced Fare Intelligence
+
+Users can submit:
+
+* Quoted fare
+* Actual fare paid
+* Route details
+
+Building a city-wide dataset of fare trends and overcharging patterns.
+
+### 🤖 Machine Learning (In Progress)
+
+Planned features:
+
+* Fare prediction
+* Overcharge risk scoring
+* Route risk classification
+* Overcharge hotspot detection
+* Dynamic fare trend analysis
+
+---
+
+## 🏗️ Tech Stack
+
+### Frontend
+
+* Next.js 15
+* TypeScript
+* Tailwind CSS
+* Shadcn UI
+* Zustand
+
+### Backend
+
+* Next.js Route Handlers
+* Supabase
+
+### Maps & Location
+
+* Google Places API
+* Google Distance Matrix API
+
+### Database
+
+* PostgreSQL (Supabase)
+
+### Data Visualization
+
+* Recharts
+
+### Machine Learning
+
+* Python
+* Pandas
+* Scikit-learn
+* XGBoost
+
+### Deployment
+
+* Vercel
+
+---
+
+## 📸 Core User Flow
+
+```text
+User
+ ↓
+Select Pickup & Drop
+ ↓
+Distance Calculation
+ ↓
+Fare Estimation
+ ↓
+Official vs Street Fare
+ ↓
+Submit Actual Fare
+ ↓
+Dispute Report
+ ↓
+Crowdsourced Analytics
+ ↓
+ML Insights
+```
+
+---
+
+## 📂 Project Structure
+
+```text
+autofare-ai/
+│
+├── src/
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   ├── hooks/
+│   ├── store/
+│   ├── types/
+│   └── api/
+│
+├── supabase/
+├── ml/
+├── public/
+└── docs/
+```
+
+---
+
+## ⚙️ Environment Variables
+
+Create a `.env.local` file:
+
+```env
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
+
+NEXT_PUBLIC_SUPABASE_URL=
+
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+---
+
+## 🚀 Getting Started
+
+Clone the repository:
+
+```bash
+git clone <repository-url>
+cd autofare-ai
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## 📊 Roadmap
 
-To learn more about Next.js, take a look at the following resources:
+### Phase 1
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+* [x] Fare Calculator
+* [x] Distance Estimation
+* [x] Fare Breakdown
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Phase 2
 
-## Deploy on Vercel
+* [x] Fare Reports
+* [x] Dispute Mode
+* [x] Analytics Dashboard
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Phase 3
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+* [ ] Tamil Localization
+* [ ] Auto Stand Locator
+* [ ] Multi-City Support
+
+### Phase 4
+
+* [ ] ML Fare Prediction
+* [ ] Overcharge Detection
+* [ ] Route Risk Scoring
+* [ ] Heatmap Analytics
+
+---
+
+## 🎯 Problem Statement
+
+Millions of commuters across Indian cities face uncertainty regarding auto-rickshaw fares.
+
+AutoFare AI aims to:
+
+* Improve fare transparency
+* Reduce overcharging
+* Provide reliable fare estimates
+* Build a crowdsourced mobility intelligence platform
+
+---
+
+## 📈 Future Vision
+
+AutoFare AI is designed to evolve into a city-scale transportation intelligence platform that combines:
+
+* Government fare policies
+* Real-world commuter reports
+* Geospatial analytics
+* Machine learning predictions
+
+to make urban transportation more transparent and data-driven.
+
+---
+
+## 👨‍💻 Author
+
+Built by Nikkii as a full-stack + machine learning project focused on solving real-world urban mobility challenges.
+
+---
+
+### ⭐ If you find this project useful, consider starring the repository.
